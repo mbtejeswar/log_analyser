@@ -1,0 +1,4 @@
+watchdog
+tree-sitter
+google-cloud-aiplatform
+pinecone-client
