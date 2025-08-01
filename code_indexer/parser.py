@@ -1,13 +1,10 @@
-from tree_sitter import Language, Parser
+# code_indexer/parser.py
 
-# Build a shared library with the Java grammar (this happens once).
-Language.build_library(
-  'build/my-languages.so',
-  ['vendor/tree-sitter-java'] # Path to the cloned tree-sitter-java repo
-)
-JAVA_LANGUAGE = Language('build/my-languages.so', 'java')
-parser = Parser()
-parser.set_language(JAVA_LANGUAGE)
+from tree_sitter_languages import get_parser
+
+# Get a pre-configured parser for the Java language.
+# This automatically handles loading the correct compiled grammar.
+parser = get_parser('java')
 
 def extract_method_chunks(file_path: str) -> list[dict]:
     """Parses a Java file and extracts all method declarations as chunks."""
@@ -18,6 +15,7 @@ def extract_method_chunks(file_path: str) -> list[dict]:
         tree = parser.parse(source_code_bytes)
         chunks = []
         
+        # This parsing logic remains the same, as it operates on the AST
         for node in tree.root_node.children:
             if node.type == 'class_declaration':
                 for class_body_node in node.children:
