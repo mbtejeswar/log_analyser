@@ -1,41 +1,55 @@
-import pinecone
-from google.cloud import aiplatform
+import chromadb
+from abc.langchain.embeddings import StorkEmbeddings
 from config import (
-    PINECONE_API_KEY, PINECONE_ENVIRONMENT, PINECONE_INDEX_NAME,
-    GCP_PROJECT_ID, GCP_REGION, VERTEX_EMBEDDING_ENDPOINT
+    CHROMA_DB_PATH,
+    CHROMA_COLLECTION_NAME,
 )
 
-# Initialize clients
-aiplatform.init(project=GCP_PROJECT_ID, location=GCP_REGION)
-pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENVIRONMENT)
-index = pinecone.Index(PINECONE_INDEX_NAME)
+# --- Initialize ChromaDB Client ---
+client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+collection = client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
 
-def get_embeddings_from_vertex(texts: list[str]) -> list[list[float]]:
-    """Sends a batch of text to Vertex AI and returns embeddings."""
-    endpoint = aiplatform.Endpoint(VERTEX_EMBEDDING_ENDPOINT)
-    response = endpoint.predict(instances=[{"content": text} for text in texts])
-    return [embedding.values for embedding in response.predictions]
+# --- Initialize Stork Embeddings ---
+embedModel = StorkEmbeddings(
+    provider='GCP_VERTEX_AI', 
+    provider_id='textembedding-gecko@001'
+)
 
-def upsert_to_pinecone(chunks: list[dict]):
-    """Generates embeddings and upserts chunks into Pinecone in batches."""
+def get_embeddings_from_stork(texts: list[str]) -> list[list[float]]:
+    """Generates embeddings using Stork's LangChain integration."""
+    try:
+        # LangChain's embed_documents method handles batch processing
+        embeddings = embedModel.embed_documents(texts)
+        return embeddings
+    except Exception as e:
+        print(f"Error calling Stork embeddings: {e}")
+        return []
+
+def upsert_to_chromadb(chunks: list[dict]):
+    """Generates embeddings via Stork and upserts chunks into ChromaDB in batches."""
     if not chunks:
         return
 
-    batch_size = 50  # Optimal batch size for Vertex AI
+    batch_size = 50  # Process chunks in batches for efficiency
     for i in range(0, len(chunks), batch_size):
         batch_chunks = chunks[i:i + batch_size]
-        code_snippets = [chunk['code'] for chunk in batch_chunks]
         
-        embeddings = get_embeddings_from_vertex(code_snippets)
+        ids = [chunk['id'] for chunk in batch_chunks]
+        documents = [chunk['code'] for chunk in batch_chunks]
+        metadatas = [chunk['metadata'] for chunk in batch_chunks]
         
-        vectors_to_upsert = []
-        for chunk, embedding in zip(batch_chunks, embeddings):
-            vectors_to_upsert.append({
-                "id": chunk["id"],
-                "values": embedding,
-                "metadata": chunk["metadata"]
-            })
+        # Generate embeddings using Stork
+        embeddings = get_embeddings_from_stork(documents)
         
-        index.upsert(vectors=vectors_to_upsert)
-        print(f"Upserted {len(vectors_to_upsert)} vectors to Pinecone.")
-
+        if not embeddings:
+            print("Skipping batch due to embedding generation failure.")
+            continue
+        
+        # Upsert the batch to ChromaDB
+        collection.upsert(
+            ids=ids,
+            embeddings=embeddings,
+            documents=documents,
+            metadatas=metadatas
+        )
+        print(f"Upserted {len(batch_chunks)} vectors to ChromaDB via Stork.")

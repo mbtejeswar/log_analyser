@@ -30,4 +30,3 @@ if __name__ == '__main__':
     # containing thousands of log lines from your application during
     # a period of normal, stable operation.
     train_and_save_model('data/normal_logs.csv')
-

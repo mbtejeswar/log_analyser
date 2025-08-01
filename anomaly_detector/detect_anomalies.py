@@ -36,4 +36,3 @@ if __name__ == '__main__':
     for log, result in zip(new_logs, results):
         status = "Anomaly" if result == -1 else "Normal"
         print(f"[{status}] {log}")
-

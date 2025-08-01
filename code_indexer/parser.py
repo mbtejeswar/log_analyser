@@ -48,4 +48,3 @@ def extract_method_chunks(file_path: str) -> list[dict]:
     except Exception as e:
         print(f"Error parsing {file_path}: {e}")
         return []
-
