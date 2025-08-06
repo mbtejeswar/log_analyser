@@ -1,15 +1,23 @@
-// components/ChatWindow.tsx - Updated with complete types
+// components/ChatWindow.tsx - Simplified to remove duplicate API handling
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, User, Bot, Copy, Check } from 'lucide-react';
-import { ChatWindowProps, Message, RCAApiRequest, RCAApiResponse } from '../types';
+import { Message } from '../types';
+
+interface ChatWindowProps {
+  conversation: any; // Using any for now to avoid type issues
+  onUpdateConversation: (id: string, messages: Message[]) => void;
+  sidebarOpen: boolean;
+  isLoading?: boolean; // Add loading prop
+}
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   conversation,
   onUpdateConversation,
-  sidebarOpen
+  sidebarOpen,
+  isLoading = false
 }) => {
   const [input, setInput] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [localLoading, setLocalLoading] = useState<boolean>(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -33,18 +41,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const callRCAAPI = async (message: string, history: Message[]): Promise<string> => {
     try {
-      const requestBody: RCAApiRequest = {
+      const requestBody = {
         message,
         conversationId: conversation?.id || '',
-        history: history.map(msg => ({
+        history: history.slice(0, -1).map(msg => ({
           role: msg.role,
           content: msg.content
         })),
         metadata: {
           sessionId: `session_${Date.now()}`,
-          analysisType: 'root_cause_analysis'
+          analysisType: conversation?.jiraId ? 'jira_investigation' : 'general',
+          jiraId: conversation?.jiraId
         }
       };
+
+      console.log('ChatWindow API call:', requestBody); // Debug log
 
       const response = await fetch('/api/rca/analyze', {
         method: 'POST',
@@ -59,7 +70,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         throw new Error(`RCA API Error: ${response.status} ${response.statusText}`);
       }
 
-      const data: RCAApiResponse = await response.json();
+      const data = await response.json();
       return data.analysis || data.response || 'Analysis completed successfully.';
 
     } catch (error) {
@@ -69,7 +80,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   const sendMessage = async (): Promise<void> => {
-    if (!input.trim() || !conversation || isLoading) return;
+    if (!input.trim() || !conversation || localLoading || isLoading) return;
 
     const userMessage: Message = {
       id: `msg_${Date.now()}_user`,
@@ -84,11 +95,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     const updatedMessages = [...conversation.messages, userMessage];
     onUpdateConversation(conversation.id, updatedMessages);
     setInput('');
-    setIsLoading(true);
+    setLocalLoading(true);
 
     try {
       const startTime = Date.now();
-      const response = await callRCAAPI(input.trim(), conversation.messages);
+      const response = await callRCAAPI(input.trim(), updatedMessages);
       const processingTime = Date.now() - startTime;
 
       const botMessage: Message = {
@@ -98,7 +109,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         timestamp: new Date(),
         metadata: {
           processingTime,
-          confidence: 0.95 // You can get this from your API response
+          confidence: 0.95
         }
       };
 
@@ -117,7 +128,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       };
       onUpdateConversation(conversation.id, [...updatedMessages, errorMessage]);
     } finally {
-      setIsLoading(false);
+      setLocalLoading(false);
     }
   };
 
@@ -152,17 +163,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         <div className="empty-chat">
           <Bot size={48} />
           <h3>Welcome to RCA Agent</h3>
-          <p>Start a new conversation to begin root cause analysis</p>
+          <p>Click "New Analysis" to start investigating a JIRA ticket</p>
         </div>
       </div>
     );
   }
 
+  const isAnyLoading = isLoading || localLoading;
+
   return (
     <div className={`chat-window ${sidebarOpen ? 'with-sidebar' : 'full-width'}`}>
       <div className="chat-header">
         <h3>Root Cause Analysis Agent</h3>
-        <span className="conversation-title">{conversation.title}</span>
+        <span className="conversation-title">
+          {conversation.jiraId ? `JIRA: ${conversation.jiraId}` : conversation.title}
+        </span>
         {conversation.messages.length > 0 && (
           <span className="message-count">
             {conversation.messages.length} messages • Updated {formatTimestamp(conversation.updatedAt || conversation.createdAt)}
@@ -171,7 +186,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       </div>
 
       <div className="messages-container">
-        {conversation.messages.map(message => (
+        {conversation.messages.map((message: Message) => (
           <div key={message.id} className={`message ${message.role}`}>
             <div className="message-avatar">
               {message.role === 'user' ? <User size={20} /> : <Bot size={20} />}
@@ -205,7 +220,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         ))}
         
-        {isLoading && (
+        {isAnyLoading && (
           <div className="message assistant">
             <div className="message-avatar">
               <Bot size={20} />
@@ -217,7 +232,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 <span></span>
               </div>
               <div className="message-timestamp">
-                Analyzing...
+                {isLoading ? 'Starting analysis...' : 'Analyzing...'}
               </div>
             </div>
           </div>
@@ -232,14 +247,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Describe the issue for root cause analysis..."
-            disabled={isLoading}
+            placeholder={
+              conversation.jiraId 
+                ? `Continue analyzing JIRA ${conversation.jiraId}...` 
+                : "Ask follow-up questions about the analysis..."
+            }
+            disabled={isAnyLoading}
             rows={1}
             maxLength={2000}
           />
           <button
             onClick={sendMessage}
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || isAnyLoading}
             className="send-button"
             aria-label="Send message"
           >
