@@ -1,0 +1,56 @@
+# main_rca_agent.py
+
+from enhanced_retrieval import EnhancedRetriever
+from prompt_engine import PromptEngine
+
+def enhanced_perform_rca(user_query: str, chat_history: list[dict], application_logs: str) -> dict:
+    """
+    Performs a context-aware Root Cause Analysis using a multi-step, stateless process.
+
+    Args:
+        user_query: The latest message from the user.
+        chat_history: A list of previous conversation turns, passed as a JSON object.
+        application_logs: The relevant application logs as a single string.
+
+    Returns:
+        A dictionary containing the analysis from the LLM.
+    """
+    print("🚀 Starting enhanced RCA process...")
+
+    # 1. Initialize our enhanced components
+    retriever = EnhancedRetriever()
+    prompt_engine = PromptEngine()
+
+    # 2. Perform a multi-faceted search to find the most relevant code
+    # This now searches based on the query, logs, and history themes separately.
+    retrieved_context = retriever.find_relevant_code(
+        user_query=user_query,
+        error_log=application_logs,
+        chat_history=chat_history
+    )
+
+    # 3. Dynamically build a highly-contextual prompt for the LLM
+    final_prompt = prompt_engine.build_prompt(
+        user_query=user_query,
+        chat_history=chat_history,
+        error_log=application_logs,
+        code_snippets=retrieved_context['ranked_code_snippets']
+    )
+
+    # 4. Call the LLM (your existing function)
+    # llm_response = call_stork_with_enhanced_prompt(final_prompt)
+    llm_response = {"analysis": "This is a placeholder response from the LLM based on the enhanced context."} # Placeholder
+
+    # 5. Return the final result
+    response = {
+        "llm_analysis": llm_response,
+        "retrieval_metadata": {
+            "search_strategy": "Multi-Query Hybrid Search",
+            "code_snippets_found": len(retrieved_context['ranked_code_snippets']),
+            "log_keywords_used": retrieved_context['log_keywords'],
+            "history_themes_used": retrieved_context['history_themes']
+        }
+    }
+    print("✅ Enhanced RCA process complete.")
+    return response
+
