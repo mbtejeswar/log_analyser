@@ -1,147 +1,78 @@
-class EnhancedCodeRetrieval:
+# enhanced_retrieval.py
+
+import re
+import chromadb
+# from your_embedding_module import embedModel # Your embedding model
+# Note: For this example, we'll simulate the embedding model and DB client.
+
+class EnhancedRetriever:
     def __init__(self):
-        self.chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-        self.code_collection = self.chroma_client.get_collection("java_code_analysis")
-        self.log_collection = self.chroma_client.get_or_create_collection("application_logs")
-        self.embedModel = StorkEmbeddings(provider='GCP_VERTEX_AI', provider_id='gemini-embedding-001')
-        self.query_processor = EnhancedQueryProcessor()
-    
-    def enhanced_search(self, query: str, conversation_history: List[Dict] = None, 
-                       jira_logs: List[Dict] = None, top_k: int = 8) -> Dict:
-        """Enhanced search combining multiple strategies."""
-        
-        # Step 1: Classify the query
-        query_type, confidence, entities = self.query_processor.classify_query(query)
-        
-        print(f"🎯 Query classified as: {query_type.value} (confidence: {confidence:.2f})")
-        print(f"📝 Entities found: {entities}")
-        
-        # Step 2: Multi-strategy search based on query type
-        search_results = self.execute_multi_strategy_search(query, query_type, entities, top_k)
-        
-        # Step 3: Enhance with conversation context
-        if conversation_history:
-            context_enhanced = self.enhance_with_conversation_context(
-                search_results, conversation_history, query
-            )
-            search_results.update(context_enhanced)
-        
-        # Step 4: Enhance with log correlation
-        if jira_logs:
-            log_enhanced = self.correlate_with_logs(search_results, jira_logs, query)
-            search_results.update(log_enhanced)
-        
-        return search_results
-    
-    def execute_multi_strategy_search(self, query: str, query_type: QueryType, 
-                                    entities: Dict, top_k: int) -> Dict:
-        """Execute different search strategies based on query type."""
-        
-        results = {
-            'primary_results': [],
-            'supporting_results': [],
-            'search_strategy': query_type.value,
-            'confidence': 0
-        }
-        
-        if query_type == QueryType.SPECIFIC_CLASS:
-            results = self.search_specific_classes(entities['class_names'], query, top_k)
-        
-        elif query_type == QueryType.SPECIFIC_METHOD:
-            results = self.search_specific_methods(entities['method_names'], query, top_k)
-        
-        elif query_type == QueryType.ERROR_ANALYSIS:
-            results = self.search_error_related_code(query, entities['error_terms'], top_k)
-        
-        elif query_type == QueryType.FLOW_UNDERSTANDING:
-            results = self.search_workflow_code(query, entities, top_k)
-        
-        else:  # CONCEPTUAL or others
-            results = self.search_conceptual(query, top_k)
-        
-        return results
-    
-    def search_specific_classes(self, class_names: List[str], original_query: str, top_k: int) -> Dict:
-        """Targeted search for specific classes."""
-        primary_results = []
-        
-        for class_name in class_names:
-            # Exact metadata search
-            exact_matches = self.code_collection.get(
-                where={
-                    "$or": [
-                        {"class_name": {"$contains": class_name}},
-                        {"file_path": {"$contains": class_name}}
-                    ]
-                },
-                limit=top_k // len(class_names) if class_names else top_k
-            )
-            
-            if exact_matches['documents']:
-                primary_results.extend(exact_matches['documents'])
-        
-        # If no exact matches, fall back to semantic search
-        if not primary_results:
-            query_embedding = self.embedModel.embed_query(original_query)
-            semantic_results = self.code_collection.query(
-                query_embeddings=[query_embedding],
-                n_results=top_k
-            )
-            primary_results = semantic_results['documents'][0] if semantic_results['documents'] else []
-        
+        # self.client = chromadb.PersistentClient(path="/path/to/your/db")
+        # self.collection = self.client.get_collection("java_code_analysis")
+        # self.embedModel = embedModel
+        print(" retriever initialized.")
+
+    def _query_collection(self, query_text: str, top_k: int = 5) -> list:
+        """Simulates querying the ChromaDB collection."""
+        print(f"  -> Searching for: '{query_text[:50]}...'")
+        # In a real scenario:
+        # query_embedding = self.embedModel.embed_query(query_text)
+        # results = self.collection.query(
+        #     query_embeddings=[query_embedding],
+        #     n_results=top_k
+        # )
+        # return results['documents'][0] if results['documents'] else []
+        return [f"// Mock code snippet found for query: {query_text}\npublic void exampleMethod() {{}}"] # Placeholder
+
+    def _extract_log_keywords(self, error_log: str) -> list:
+        """Extracts key technical terms from error logs for keyword search."""
+        keywords = re.findall(r'([a-zA-Z0-9_]*Exception|FATAL|ERROR|timeout|[A-Z][a-zA-Z]+Service)', error_log)
+        return list(set(keywords))
+
+    def _extract_history_themes(self, chat_history: list[dict]) -> list:
+        """Extracts key nouns and technical terms from conversation history."""
+        full_text = " ".join([turn.get('content', '') for turn in chat_history])
+        themes = re.findall(r'([A-Z][a-zA-Z]+Service|database|API|authentication)', full_text)
+        return list(set(themes))
+
+    def find_relevant_code(self, user_query: str, error_log: str, chat_history: list[dict], top_k: int = 10) -> dict:
+        """
+        Performs multiple targeted searches and combines results for maximum relevance.
+        """
+        print("🔎 Performing multi-query hybrid search...")
+        all_snippets = {}
+
+        # 1. Semantic search on the user's direct query
+        user_query_results = self._query_collection(user_query, top_k=3)
+        for snippet in user_query_results:
+            all_snippets[snippet] = all_snippets.get(snippet, 0) + 1.5 # Higher weight for direct query
+
+        # 2. Semantic search on the raw error log
+        log_query_results = self._query_collection(error_log, top_k=3)
+        for snippet in log_query_results:
+            all_snippets[snippet] = all_snippets.get(snippet, 0) + 1.0
+
+        # 3. Keyword-based search for technical terms from logs
+        log_keywords = self._extract_log_keywords(error_log)
+        if log_keywords:
+            keyword_query = "Code related to " + " ".join(log_keywords)
+            keyword_results = self._query_collection(keyword_query, top_k=3)
+            for snippet in keyword_results:
+                all_snippets[snippet] = all_snippets.get(snippet, 0) + 1.2 # High weight for keywords
+
+        # 4. Contextual search based on conversation themes
+        history_themes = self._extract_history_themes(chat_history)
+        if history_themes:
+            theme_query = "Follow-up on " + " ".join(history_themes)
+            theme_results = self._query_collection(theme_query, top_k=2)
+            for snippet in theme_results:
+                all_snippets[snippet] = all_snippets.get(snippet, 0) + 0.8 # Lower weight for general themes
+
+        # 5. Rank results by frequency and weight
+        ranked_snippets = sorted(all_snippets.keys(), key=lambda k: all_snippets[k], reverse=True)
+
         return {
-            'primary_results': primary_results[:top_k],
-            'supporting_results': [],
-            'search_strategy': 'specific_class_search',
-            'confidence': 0.9 if primary_results else 0.1
-        }
-    
-    def search_error_related_code(self, query: str, error_terms: List[str], top_k: int) -> Dict:
-        """Search for code related to specific errors."""
-        
-        # Enhance query with error context
-        enhanced_query = f"{query} exception handling error management try catch"
-        
-        # Semantic search
-        query_embedding = self.embedModel.embed_query(enhanced_query)
-        semantic_results = self.code_collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k
-        )
-        
-        # Filter for error-handling patterns
-        error_handling_results = []
-        if semantic_results['documents']:
-            for doc in semantic_results['documents'][0]:
-                if any(term in doc.lower() for term in ['try', 'catch', 'throw', 'exception', 'error', 'null']):
-                    error_handling_results.append(doc)
-        
-        return {
-            'primary_results': error_handling_results[:top_k//2],
-            'supporting_results': semantic_results['documents'][0][top_k//2:top_k] if semantic_results['documents'] else [],
-            'search_strategy': 'error_analysis_search',
-            'confidence': 0.8 if error_handling_results else 0.3
-        }
-    
-    def correlate_with_logs(self, search_results: Dict, jira_logs: List[Dict], query: str) -> Dict:
-        """Enhance search results with log correlation."""
-        
-        # Extract relevant log entries
-        relevant_logs = []
-        for log in jira_logs:
-            log_text = log.get('message', '') + ' ' + log.get('stackTrace', '')
-            
-            # Check if log mentions any classes from search results
-            for code_chunk in search_results['primary_results']:
-                # Extract class names from code chunks
-                class_matches = re.findall(r'class\s+([A-Z][a-zA-Z0-9_]*)', code_chunk)
-                method_matches = re.findall(r'public\s+\w+\s+([a-z][a-zA-Z0-9_]*)\(', code_chunk)
-                
-                if any(cls in log_text for cls in class_matches) or any(method in log_text for method in method_matches):
-                    relevant_logs.append(log)
-                    break
-        
-        return {
-            'log_correlation': relevant_logs,
-            'correlation_score': len(relevant_logs) / max(len(jira_logs), 1)
+            "ranked_code_snippets": ranked_snippets[:top_k],
+            "log_keywords": log_keywords,
+            "history_themes": history_themes
         }
