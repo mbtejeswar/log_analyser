@@ -1,98 +1,60 @@
-class EnhancedPromptBuilder:
-    def __init__(self):
-        self.prompt_templates = {
-            'specific_class': self.build_class_specific_prompt,
-            'error_analysis': self.build_error_analysis_prompt,
-            'flow_understanding': self.build_flow_prompt,
-            'followup': self.build_followup_prompt,
-            'general': self.build_general_prompt
-        }
-    
-    def build_enhanced_prompt(self, context: Dict) -> str:
-        """Build context-aware prompt based on query type and available information."""
+# prompt_engine.py
+
+class PromptEngine:
+    def _summarize_history(self, chat_history: list[dict]) -> str:
+        """Creates a concise summary of the conversation."""
+        if not chat_history:
+            return "No previous conversation history."
         
-        query_type = context['query_metadata']['search_strategy']
-        is_followup = context['is_followup']
-        
-        # Select appropriate prompt builder
-        if is_followup:
-            prompt_builder = self.prompt_templates['followup']
-        else:
-            prompt_builder = self.prompt_templates.get(query_type, self.prompt_templates['general'])
-        
-        return prompt_builder(context)
-    
-    def build_error_analysis_prompt(self, context: Dict) -> str:
-        """Build prompt for error analysis queries."""
-        
-        primary_code = '\n'.join(context['search_results']['primary_results'][:3])
-        supporting_code = '\n'.join(context['search_results']['supporting_results'][:2])
-        jira_logs = context.get('jira_logs', [])
-        
-        log_section = ""
-        if jira_logs:
-            log_section = f"""
---- RELEVANT JIRA LOGS ---
-{chr(10).join([f"[{log.get('timestamp', 'N/A')}] {log.get('level', 'INFO')}: {log.get('message', '')}" for log in jira_logs[:5]])}
-"""
+        summary = "Key points from the conversation so far:\n"
+        for turn in chat_history[-4:]: # Summarize last 4 turns
+            role = turn.get('role', 'Unknown')
+            content = turn.get('content', '')
+            summary += f"- The {role} mentioned: '{content[:80]}...'\n"
+        return summary
 
-        return f"""
-You are an expert Java developer and system architect analyzing a production issue.
+    def build_prompt(self, user_query: str, chat_history: list[dict], error_log: str, code_snippets: list[str]) -> str:
+        """
+        Dynamically constructs a prompt with all available context.
+        """
+        print("⚙️ Building dynamic LLM prompt...")
 
-{log_section}
+        conversation_summary = self._summarize_history(chat_history)
+        code_context = "\n".join(code_snippets) if code_snippets else "No specific code snippets were found to be relevant."
 
---- PRIMARY CODE CONTEXT ---
-{primary_code}
+        # A single, powerful prompt template that handles all cases
+        prompt = f"""
+You are an expert AI Root Cause Analysis assistant. Your goal is to provide a clear, accurate, and helpful analysis based on all available information.
 
---- SUPPORTING CODE CONTEXT ---
-{supporting_code}
+--- CONVERSATION SUMMARY ---
+{conversation_summary}
 
---- CONVERSATION THEMES ---
-Previous discussion has covered: {', '.join(context.get('conversation_themes', []))}
-
---- USER QUERY ---
-{context.get('current_query', '')}
-
---- ANALYSIS REQUEST ---
-Based on the logs, code context, and conversation history:
-1. Identify the root cause of the issue
-2. Explain how the code relates to the logs/errors
-3. Suggest specific fixes with code examples if possible
-4. Highlight any patterns or recurring issues
-5. Reference the relevant code sections and log entries
-
-Provide a comprehensive but concise analysis focusing on actionable insights.
-"""
-    
-    def build_followup_prompt(self, context: Dict) -> str:
-        """Build prompt for follow-up questions."""
-        
-        recent_history = context['conversation_history'][-4:]  # Last 2 exchanges
-        current_code = '\n'.join(context['search_results']['primary_results'][:2])
-        
-        history_text = '\n'.join([
-            f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {msg.get('content', '')}"
-            for msg in recent_history
-        ])
-        
-        return f"""
-You are continuing a technical conversation about a Java application issue.
-
---- RECENT CONVERSATION ---
-{history_text}
+--- APPLICATION LOGS ---
+{error_log}
 
 --- RELEVANT CODE CONTEXT ---
-{current_code}
+Based on the query, logs, and history, the following code may be relevant:
+{code_context}
 
---- CURRENT FOLLOW-UP QUESTION ---
-{context.get('current_query', '')}
+--- LATEST USER QUERY ---
+"{user_query}"
 
---- RESPONSE GUIDELINES ---
-1. Build upon the previous conversation context
-2. Reference earlier points when relevant
-3. Use the code context to provide specific answers
-4. If the question asks about something new, incorporate it with the ongoing discussion
-5. Keep responses focused and technically accurate
+--- YOUR TASK ---
+Based on ALL the context above (logs, code, and conversation history), provide a comprehensive response. Your response must include two parts in valid JSON format:
+1.  A "conversational_analysis" key: A clear, conversational explanation answering the user's query. Reference the code, logs, and history where appropriate.
+2.  An "structured_rca" key: A JSON object containing a detailed root cause analysis. If the user's query isn't about RCA, this can be an empty object. The RCA object should contain:
+    - "root_cause": A brief statement of the most likely root cause.
+    - "confidence_score": A float from 0.0 to 1.0.
+    - "recommended_action": A specific, actionable recommendation.
 
-Respond as if you're an experienced developer who has been following this conversation from the start.
+Example Response Format:
+{{
+  "conversational_analysis": "It looks like the `NullPointerException` is occurring in the `UserService` because...",
+  "structured_rca": {{
+    "root_cause": "The 'user' object is not checked for null before being used.",
+    "confidence_score": 0.85,
+    "recommended_action": "Add a null check in `UserService.java` before line 42: `if (user != null) {{ ... }}`."
+  }}
+}}
 """
+        return prompt
